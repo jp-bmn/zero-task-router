@@ -62,8 +62,11 @@ export default function Home() {
   const [logN,        setLogN]        = useState(0)
   const [accuracy,    setAccuracy]    = useState(0)
   const [rateVal,     setRateVal]     = useState(0)
+  const [reliability, setReliability] = useState(0)
+  const [reviewNote,  setReviewNote]  = useState('')
   const [reviewed,    setReviewed]    = useState(false)
   const [showReview,  setShowReview]  = useState(false)
+  const [bodyErr,     setBodyErr]     = useState<string|null>(null)
   const termRef  = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -177,12 +180,22 @@ export default function Home() {
   /* ── Run ────────────────────────────────────────────────────── */
   async function doRun() {
     if (!selected) return
+    // Validate JSON before kicking off the run — fail fast with inline error
+    let body: Record<string, unknown> = {}
+    if (reqBody.trim()) {
+      try { body = JSON.parse(reqBody) }
+      catch (e) {
+        const msg = e instanceof Error ? e.message : 'invalid JSON'
+        setBodyErr(msg)
+        addLog(`Request body is not valid JSON: ${msg}`, 'error')
+        return
+      }
+    }
+    setBodyErr(null)
     setRunning(true); setResult(null); setShowReview(false)
     addLog(`zero fetch ${detail?.url || '[endpoint]'} --json`, 'cmd')
     addLog(`x402 challenge detected (${selected.priceDisplay}).`, 'info', 380)
     addLog(`Auto-paying ${selected.priceDisplay}… Paid. Result stream:`, 'pay', 980)
-    let body = {}
-    try { body = JSON.parse(reqBody || '{}') } catch {}
     try {
       const d = await fetch('/api/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url: detail?.url, data: body, maxPay }) }).then(r => r.json())
       const res = d.ok ? d.result : { error: d.error ?? 'Run failed' }
@@ -194,12 +207,24 @@ export default function Home() {
 
   /* ── Review ─────────────────────────────────────────────────── */
   async function doReview() {
-    if (!accuracy || !rateVal) return
+    if (!accuracy || !rateVal || !reliability) return
     try {
-      if (runId) await fetch('/api/review', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ runId, accuracy, value: rateVal }) })
+      if (runId) await fetch('/api/review', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ runId, accuracy, value: rateVal, reliability, content: reviewNote.trim() || undefined })
+      })
     } catch {}
-    addLog(`Review submitted — accuracy:${accuracy} value:${rateVal}`, 'success')
+    addLog(`Review submitted — accuracy:${accuracy} value:${rateVal} reliability:${reliability}`, 'success')
     setReviewed(true)
+  }
+
+  /* ── Reset ──────────────────────────────────────────────────── */
+  function doReset() {
+    setQuery(''); setCaps([]); setSelected(null); setDetail(null); setReqBody('')
+    setResult(null); setRunId(null); setLog([])
+    setAccuracy(0); setRateVal(0); setReliability(0); setReviewNote('')
+    setReviewed(false); setShowReview(false); setBodyErr(null)
+    inputRef.current?.focus()
   }
 
   /* ── Schema display ─────────────────────────────────────────── */
@@ -261,6 +286,11 @@ export default function Home() {
         .skip-link{position:absolute;top:-40px;left:8px;z-index:100;background:${CYAN};color:#000;padding:8px 16px;border-radius:4px;font-weight:700;text-decoration:none;}
         .skip-link:focus{top:8px;}
         @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}}
+        .bento-top { display:grid; grid-template-columns: 1fr 340px; gap:14px; margin-bottom:14px; }
+        .bento-bottom { display:grid; grid-template-columns: 330px 1fr; gap:14px; }
+        @media (max-width: 900px) {
+          .bento-top, .bento-bottom { grid-template-columns: 1fr; }
+        }
       `}</style>
 
       <a href="#main" className="skip-link">Skip to main content</a>
@@ -272,8 +302,16 @@ export default function Home() {
           <h1 style={{ fontSize:20, fontWeight:800, letterSpacing:'0.06em', textTransform:'uppercase', color:T.text }}>
             Zero Task Router
           </h1>
-          <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
             <span style={{ fontSize:13, color:T.textMute }}>Built at Zero UNLOCKED Hackathon · May 2026</span>
+            <button onClick={doReset}
+              aria-label="Reset to start a fresh demo"
+              title="Clear all state and start over"
+              style={{ display:'flex', alignItems:'center', gap:6, background:T.toggleBg, border:`1px solid ${T.border}`,
+                color:T.textSec, borderRadius:20, padding:'6px 14px', fontSize:13, fontWeight:500, cursor:'pointer' }}>
+              <span aria-hidden="true">↺</span>
+              <span>Reset</span>
+            </button>
             <button onClick={() => setDark(d => !d)}
               aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
               style={{ display:'flex', alignItems:'center', gap:6, background:T.toggleBg, border:`1px solid ${T.border}`,
@@ -287,7 +325,7 @@ export default function Home() {
         <main role="main">
 
           {/* ── TOP ROW ─────────────────────────────────────────── */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:14, marginBottom:14 }}>
+          <div className="bento-top">
 
             {/* TOP-LEFT: Task & Registry */}
             <section style={card} aria-labelledby="task-h">
@@ -436,7 +474,7 @@ export default function Home() {
           </div>
 
           {/* ── BOTTOM ROW ──────────────────────────────────────── */}
-          <div style={{ display:'grid', gridTemplateColumns:'330px 1fr', gap:14 }}>
+          <div className="bento-bottom">
 
             {/* BOTTOM-LEFT: Capability Schema */}
             <section style={{ ...card, display:'flex', flexDirection:'column', gap:0 }} aria-labelledby="schema-h">
@@ -466,14 +504,23 @@ export default function Home() {
                     </div>
                     <textarea
                       value={reqBody}
-                      onChange={e => setReqBody(e.target.value)}
+                      onChange={e => { setReqBody(e.target.value); if (bodyErr) setBodyErr(null) }}
                       aria-label="Editable request body"
+                      aria-invalid={bodyErr ? 'true' : 'false'}
+                      aria-describedby={bodyErr ? 'body-err' : undefined}
                       spellCheck={false}
                       rows={5}
-                      style={{ width:'100%', background:T.codeBg, border:`1px solid ${T.codeBorder}`,
+                      style={{ width:'100%', background:T.codeBg,
+                        border:`1px solid ${bodyErr ? '#f38ba8' : T.codeBorder}`,
                         color:'#a6e3a1', borderRadius:10, padding:'14px 16px',
                         fontFamily:"'Courier New',Courier,monospace", fontSize:12, lineHeight:1.75, resize:'vertical' }}
                     />
+                    {bodyErr && (
+                      <div id="body-err" role="alert"
+                        style={{ marginTop:6, color:'#f38ba8', fontSize:11, fontFamily:"'Courier New',monospace" }}>
+                        Invalid JSON: {bodyErr}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -528,33 +575,45 @@ export default function Home() {
               {/* Review */}
               {showReview && (
                 <div style={{ borderTop:`1px solid ${T.sep}`, paddingTop:14 }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12 }}>
-                    <fieldset style={{ border:'none' }}>
-                      <legend style={{ fontSize:11, color:T.textMute, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
-                        Rate this capability
-                      </legend>
-                      <div style={{ display:'flex', gap:24 }}>
-                        <div>
-                          <div style={{ fontSize:11, color:T.textMute, marginBottom:5, textTransform:'uppercase', letterSpacing:'0.06em' }}>Accuracy</div>
-                          <Stars val={accuracy} onChange={setAccuracy} label="Accuracy rating" />
-                        </div>
-                        <div>
-                          <div style={{ fontSize:11, color:T.textMute, marginBottom:5, textTransform:'uppercase', letterSpacing:'0.06em' }}>Value</div>
-                          <Stars val={rateVal} onChange={setRateVal} label="Value rating" />
-                        </div>
+                  <fieldset style={{ border:'none', marginBottom:10 }}>
+                    <legend style={{ fontSize:11, color:T.textMute, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
+                      Rate this capability
+                    </legend>
+                    <div style={{ display:'flex', gap:24, flexWrap:'wrap' }}>
+                      <div>
+                        <div style={{ fontSize:11, color:T.textMute, marginBottom:5, textTransform:'uppercase', letterSpacing:'0.06em' }}>Accuracy</div>
+                        <Stars val={accuracy} onChange={setAccuracy} label="Accuracy rating" />
                       </div>
-                    </fieldset>
-                    <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                      {reviewed && <span style={{ fontSize:13, color:'#22c55e' }} role="status">✓ Review submitted.</span>}
-                      {!reviewed && (
-                        <button onClick={doReview} disabled={!accuracy || !rateVal}
-                          style={{ background:'rgba(124,58,237,0.15)', border:'1px solid rgba(124,58,237,0.3)',
-                            color:'#a78bfa', borderRadius:8, padding:'8px 18px', fontSize:13, fontWeight:600,
-                            cursor:'pointer', opacity: (!accuracy || !rateVal) ? 0.4 : 1 }}>
-                          Submit Review
-                        </button>
-                      )}
+                      <div>
+                        <div style={{ fontSize:11, color:T.textMute, marginBottom:5, textTransform:'uppercase', letterSpacing:'0.06em' }}>Value</div>
+                        <Stars val={rateVal} onChange={setRateVal} label="Value rating" />
+                      </div>
+                      <div>
+                        <div style={{ fontSize:11, color:T.textMute, marginBottom:5, textTransform:'uppercase', letterSpacing:'0.06em' }}>Reliability</div>
+                        <Stars val={reliability} onChange={setReliability} label="Reliability rating" />
+                      </div>
                     </div>
+                  </fieldset>
+                  <textarea
+                    value={reviewNote}
+                    onChange={e => setReviewNote(e.target.value.slice(0, 1000))}
+                    placeholder="Optional: one concrete observation (latency, schema fit, fail mode)…"
+                    aria-label="Review note"
+                    rows={2}
+                    style={{ width:'100%', background:T.inputBg, border:`1px solid ${T.inputBorder}`,
+                      color:T.text, borderRadius:8, padding:'8px 12px', fontSize:12,
+                      fontFamily:'inherit', resize:'vertical', marginBottom:10 }}
+                  />
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:12 }}>
+                    {reviewed && <span style={{ fontSize:13, color:'#22c55e' }} role="status">✓ Review submitted.</span>}
+                    {!reviewed && (
+                      <button onClick={doReview} disabled={!accuracy || !rateVal || !reliability}
+                        style={{ background:'rgba(124,58,237,0.15)', border:'1px solid rgba(124,58,237,0.3)',
+                          color:'#a78bfa', borderRadius:8, padding:'8px 18px', fontSize:13, fontWeight:600,
+                          cursor:'pointer', opacity: (!accuracy || !rateVal || !reliability) ? 0.4 : 1 }}>
+                        Submit Review
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
