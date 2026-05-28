@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zero Task Router</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #08121f; color: #e8eef7; }
+    .app { max-width: 980px; margin: 0 auto; padding: 24px; }
+    h1, h2 { margin: 0 0 12px; }
+    .card { background: #0f1b2f; border: 1px solid #16253f; border-radius: 16px; padding: 18px; margin-bottom: 18px; }
+    label { display: block; margin-bottom: 8px; font-weight: 600; }
+    input, textarea, select, button { width: 100%; border: 1px solid #27354d; border-radius: 12px; background: #12203a; color: #eef5ff; padding: 12px; margin-bottom: 12px; }
+    button { cursor: pointer; background: #4c8cff; border-color: #3e72d1; }
+    button:hover { background: #6fa7ff; }
+    pre { background: #081622; border: 1px solid #20304a; border-radius: 14px; padding: 16px; overflow-x: auto; }
+    .row { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
+    .full { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Zero Task Router</h1>
+    <p>Search, inspect, run, and review Zero capabilities from one simple UI.</p>
+
+    <div class="card">
+      <h2>Wallet</h2>
+      <button id="walletButton">Refresh balance</button>
+      <pre id="walletOutput">Press refresh to load wallet balance.</pre>
+    </div>
+
+    <div class="card">
+      <h2>Search</h2>
+      <label for="taskInput">Describe the task</label>
+      <input id="taskInput" placeholder="e.g. summarize text, translate to Spanish, generate image" />
+      <button id="searchButton">Search capabilities</button>
+      <pre id="searchOutput">Search results appear here.</pre>
+    </div>
+
+    <div class="card">
+      <h2>Inspect</h2>
+      <label for="inspectIndex">Capability index or URL</label>
+      <input id="inspectIndex" placeholder="e.g. 1 or https://..." />
+      <button id="inspectButton">Inspect</button>
+      <pre id="inspectOutput">Capability details appear here.</pre>
+    </div>
+
+    <div class="card">
+      <h2>Run</h2>
+      <label for="runUrl">Capability URL</label>
+      <input id="runUrl" placeholder="zero://... or https://..." />
+      <label for="runJson">Input JSON</label>
+      <textarea id="runJson" rows="5" placeholder='e.g. {"text":"Hello"}'></textarea>
+      <label for="maxPay">Max pay (optional, USDC)</label>
+      <input id="maxPay" placeholder="e.g. 0.25" />
+      <button id="runButton">Run capability</button>
+      <pre id="runOutput">Run response appears here.</pre>
+    </div>
+
+    <div class="card">
+      <h2>Review</h2>
+      <label for="runId">Run ID</label>
+      <input id="runId" placeholder="e.g. abc123" />
+      <label for="rating">Rating (1-5)</label>
+      <input id="rating" type="number" min="1" max="5" placeholder="5" />
+      <label for="notes">Notes</label>
+      <textarea id="notes" rows="3" placeholder="What worked best?"></textarea>
+      <button id="reviewButton">Submit review</button>
+      <pre id="reviewOutput">Review submission status appears here.</pre>
+    </div>
+  </div>
+
+  <script>
+    const walletOutput = document.getElementById('walletOutput');
+    const searchOutput = document.getElementById('searchOutput');
+    const inspectOutput = document.getElementById('inspectOutput');
+    const runOutput = document.getElementById('runOutput');
+    const reviewOutput = document.getElementById('reviewOutput');
+
+    async function postJson(path, body) {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return res.json();
+    }
+
+    document.getElementById('walletButton').addEventListener('click', async () => {
+      walletOutput.textContent = 'Loading...';
+      const res = await fetch('/api/wallet');
+      const json = await res.json();
+      walletOutput.textContent = JSON.stringify(json, null, 2);
+    });
+
+    document.getElementById('searchButton').addEventListener('click', async () => {
+      searchOutput.textContent = 'Searching...';
+      const task = document.getElementById('taskInput').value;
+      const json = await postJson('/api/search', { task });
+      searchOutput.textContent = JSON.stringify(json, null, 2);
+    });
+
+    document.getElementById('inspectButton').addEventListener('click', async () => {
+      inspectOutput.textContent = 'Inspecting...';
+      const index = document.getElementById('inspectIndex').value;
+      const json = await postJson('/api/inspect', { index });
+      inspectOutput.textContent = JSON.stringify(json, null, 2);
+    });
+
+    document.getElementById('runButton').addEventListener('click', async () => {
+      runOutput.textContent = 'Running...';
+      const url = document.getElementById('runUrl').value;
+      let input = null;
+      const raw = document.getElementById('runJson').value.trim();
+      if (raw) {
+        try {
+          input = JSON.parse(raw);
+        } catch (err) {
+          runOutput.textContent = 'Invalid JSON input: ' + err.message;
+          return;
+        }
+      }
+      const maxPay = document.getElementById('maxPay').value;
+      const json = await postJson('/api/run', { url, input, maxPay });
+      runOutput.textContent = JSON.stringify(json, null, 2);
+    });
+
+    document.getElementById('reviewButton').addEventListener('click', async () => {
+      reviewOutput.textContent = 'Submitting review...';
+      const runId = document.getElementById('runId').value;
+      const rating = Number(document.getElementById('rating').value);
+      const notes = document.getElementById('notes').value;
+      const json = await postJson('/api/review', { runId, rating, notes });
+      reviewOutput.textContent = JSON.stringify(json, null, 2);
+    });
+  </script>
+</body>
+</html>

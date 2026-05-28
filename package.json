@@ -1,0 +1,24 @@
+{
+  "name": "zero-task-router",
+  "version": "0.1.0",
+  "description": "Zero Task Router hackathon app for searching, inspecting, running, and reviewing Zero capabilities.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "zero",
+    "task-router",
+    "hackathon",
+    "x402"
+  ],
+  "license": "MIT"
+}
