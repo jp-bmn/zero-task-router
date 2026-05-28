@@ -1,4 +1,4 @@
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import os from 'os'
 import { NextRequest, NextResponse } from 'next/server'
 import { ALL_CAPS } from '../search/route'
@@ -27,10 +27,13 @@ export async function POST(req: NextRequest) {
   }
 
   const id = parseInt(String(identifier))
+  if (!Number.isFinite(id) || id < 1 || id > 100) {
+    return NextResponse.json({ ok: false, error: 'identifier must be 1-100' }, { status: 400 })
+  }
 
-  // 1. Try Zero CLI
+  // 1. Try Zero CLI — execFileSync with arg array; identifier already integer-validated
   try {
-    const output = execSync(`zero get ${identifier} --formatted`, {
+    const output = execFileSync('zero', ['get', String(id), '--formatted'], {
       env: { ...process.env, PATH: `${ZERO_BIN}:${process.env.PATH}` },
       timeout: 15000, encoding: 'utf8',
     })
