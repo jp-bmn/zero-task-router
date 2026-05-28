@@ -1,4 +1,4 @@
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import os from 'os'
 import { NextRequest, NextResponse } from 'next/server'
 import { createWalletClient, http } from 'viem'
@@ -6,12 +6,16 @@ import { base } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 import { createPaymentHeader } from 'x402/client'
 
-const ZERO_BIN    = `${os.homedir()}/.zero/bin`
-const PRIVATE_KEY = (process.env.ZERO_PRIVATE_KEY ?? '0xa79bd8febcdbbb8c75a9e9ec0620ca5e5987b11a9bc0cc0305cc56c621f3415e') as `0x${string}`
-const X402_VER    = 1
+const ZERO_BIN     = `${os.homedir()}/.zero/bin`
+const PRIVATE_KEY  = process.env.ZERO_PRIVATE_KEY as `0x${string}` | undefined
+const X402_VER     = 1
+const MAX_PAY_CEIL = parseFloat(process.env.ZERO_MAX_PAY_CEILING ?? '0.50')
 
 /* ── Build a viem wallet client from the private key ─────────── */
 function makeWalletClient() {
+  if (!PRIVATE_KEY) {
+    throw new Error('ZERO_PRIVATE_KEY env var is required for x402 payments. Run `zero init` and set it.')
+  }
   const account = privateKeyToAccount(PRIVATE_KEY)
   return createWalletClient({ account, chain: base, transport: http('https://mainnet.base.org') })
 }
@@ -40,15 +44,20 @@ async function x402Fetch(url: string, init: RequestInit = {}): Promise<Response>
 }
 
 export async function POST(req: NextRequest) {
-  const { url, data, maxPay = 0.10 } = await req.json()
+  const { url, data, maxPay } = await req.json()
+
+  // Server-side max-pay ceiling — client cannot exceed this regardless of slider
+  const requested = typeof maxPay === 'number' && maxPay > 0 ? maxPay : 0.10
+  const effectiveMaxPay = Math.min(requested, MAX_PAY_CEIL)
 
   // ── 1. Try Zero CLI (works locally) ──────────────────────────
+  // Use execFileSync with arg array — no shell interpolation, immune to injection
   try {
-    let cmd = `zero fetch "${url}" --max-pay ${maxPay}`
+    const args = ['fetch', String(url), '--max-pay', String(effectiveMaxPay)]
     if (data && Object.keys(data).length > 0) {
-      cmd += ` -d '${JSON.stringify(data).replace(/'/g, "'\\''")}'`
+      args.push('-d', JSON.stringify(data))
     }
-    const raw = execSync(cmd, {
+    const raw = execFileSync('zero', args, {
       env: { ...process.env, PATH: `${ZERO_BIN}:${process.env.PATH}` },
       timeout: 60000, encoding: 'utf8',
     })
@@ -59,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     const runIdMatch = raw.match(/Run ID:\s*(run_[a-zA-Z0-9_]+)/)
     const runId = runIdMatch?.[1] ?? (result as Record<string,string>)?.runId ?? null
-    return NextResponse.json({ ok: true, result, runId })
+    return NextResponse.json({ ok: true, result, runId, maxPayApplied: effectiveMaxPay })
   } catch {}
 
   // ── 2. x402 direct HTTP payment (works on Vercel) ────────────
@@ -86,7 +95,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: `HTTP ${res.status}`, detail: text }, { status: 500 })
     }
 
-    return NextResponse.json({ ok: true, result, runId: null })
+    return NextResponse.json({ ok: true, result, runId: null, maxPayApplied: effectiveMaxPay })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ ok: false, error: msg }, { status: 500 })

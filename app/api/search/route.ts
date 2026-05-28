@@ -1,4 +1,4 @@
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import os from 'os'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -80,10 +80,14 @@ function smartSearch(query: string) {
 export async function POST(req: NextRequest) {
   const { query } = await req.json()
 
-  // 1. Try Zero CLI (local dev)
+  // Reject anything that isn't a reasonable plain-English query
+  if (typeof query !== 'string' || query.length === 0 || query.length > 200) {
+    return NextResponse.json({ ok: false, error: 'query must be a string, 1-200 chars' }, { status: 400 })
+  }
+
+  // 1. Try Zero CLI (local dev) — execFileSync with arg array; no shell, no injection
   try {
-    const safe = (query as string).replace(/"/g, '\\"')
-    const raw = execSync(`zero search "${safe}"`, {
+    const raw = execFileSync('zero', ['search', query], {
       env: { ...process.env, PATH: `${ZERO_BIN}:${process.env.PATH}` },
       timeout: 15000, encoding: 'utf8',
     })
