@@ -112,26 +112,36 @@ app.post('/api/run', async (req, res) => {
 });
 
 app.post('/api/review', async (req, res) => {
-  const { runId, rating, notes } = req.body;
-  if (!runId || rating === undefined) {
-    return res.status(400).json({ success: false, error: 'runId and rating are required' });
+  const { runId, quality, reliability, content, notes } = req.body;
+  if (!runId || quality === undefined || reliability === undefined || content === undefined) {
+    return res.status(400).json({ success: false, error: 'runId, quality, reliability, and content ratings are required' });
   }
 
   if (typeof runId !== 'string' || !/^run_[A-Za-z0-9_-]+$/.test(runId)) {
     return res.status(400).json({ success: false, error: 'runId must match /^run_[A-Za-z0-9_-]+$/' });
   }
 
-  const ratingInt = Number(rating);
-  if (!Number.isInteger(ratingInt) || ratingInt < 1 || ratingInt > 5) {
-    return res.status(400).json({ success: false, error: 'Rating must be an integer between 1 and 5.' });
+  const qVal = Number(quality);
+  const rVal = Number(reliability);
+  const cVal = Number(content);
+
+  if (!Number.isInteger(qVal) || qVal < 1 || qVal > 5 ||
+      !Number.isInteger(rVal) || rVal < 1 || rVal > 5 ||
+      !Number.isInteger(cVal) || cVal < 1 || cVal > 5) {
+    return res.status(400).json({ success: false, error: 'Ratings (quality, reliability, content) must be integers between 1 and 5.' });
   }
 
-  if (notes && (typeof notes !== 'string' || notes.length > 200)) {
-    return res.status(400).json({ success: false, error: 'Notes must be under 200 characters.' });
+  if (notes && (typeof notes !== 'string' || notes.length > 1000)) {
+    return res.status(400).json({ success: false, error: 'Notes must be under 1000 characters.' });
   }
 
   try {
-    const args = ['review', runId, '--rating', String(ratingInt)];
+    const args = [
+      'review', runId,
+      '--quality', String(qVal),
+      '--reliability', String(rVal),
+      '--content', String(cVal)
+    ];
     if (notes) {
       args.push('--notes', notes);
     }
