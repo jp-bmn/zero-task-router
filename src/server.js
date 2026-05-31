@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -11,10 +11,11 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const PORT = process.env.PORT || 3000;
 const ZERO_PRIVATE_KEY = process.env.ZERO_PRIVATE_KEY || null;
+const ZERO_MAX_PAY_CEILING = parseFloat(process.env.ZERO_MAX_PAY_CEILING || '0.50');
 
-function runZeroCommand(command, options = {}) {
+function runZeroCommand(args, options = {}) {
   return new Promise((resolve, reject) => {
-    exec(command, { ...options, shell: true, env: process.env }, (error, stdout, stderr) => {
+    execFile('zero', args, { ...options, env: process.env }, (error, stdout, stderr) => {
       if (error) {
         return reject({ error, stderr: stderr.trim(), stdout: stdout.trim() });
       }
@@ -35,7 +36,7 @@ function readZeroConfig() {
 
 app.get('/api/wallet', async (req, res) => {
   try {
-    const result = await runZeroCommand('zero wallet balance');
+    const result = await runZeroCommand(['wallet', 'balance']);
     res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.stderr || err.error.message });
@@ -46,9 +47,12 @@ app.post('/api/search', async (req, res) => {
   const { task } = req.body;
   if (!task) return res.status(400).json({ success: false, error: 'Task is required' });
 
+  if (typeof task !== 'string' || task.length > 200) {
+    return res.status(400).json({ success: false, error: 'Task query must be under 200 characters.' });
+  }
+
   try {
-    const command = `zero search "${task.replace(/"/g, '\\"')}"`;
-    const result = await runZeroCommand(command);
+    const result = await runZeroCommand(['search', task]);
     res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.stderr || err.error.message });
@@ -61,9 +65,13 @@ app.post('/api/inspect', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Index is required' });
   }
 
+  const indexStr = String(index);
+  if (indexStr.length > 100) {
+    return res.status(400).json({ success: false, error: 'Identifier must be under 100 characters.' });
+  }
+
   try {
-    const command = `zero get ${index} --formatted`;
-    const result = await runZeroCommand(command);
+    const result = await runZeroCommand(['get', indexStr, '--formatted']);
     res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.stderr || err.error.message });
@@ -74,11 +82,29 @@ app.post('/api/run', async (req, res) => {
   const { url, input, maxPay } = req.body;
   if (!url) return res.status(400).json({ success: false, error: 'Capability URL is required' });
 
+  if (typeof url !== 'string' || url.length > 100) {
+    return res.status(400).json({ success: false, error: 'Capability URL must be under 100 characters.' });
+  }
+
+  if (!process.env.ZERO_PRIVATE_KEY) {
+    return res.status(500).json({ success: false, error: 'ZERO_PRIVATE_KEY environment variable is not configured on the server.' });
+  }
+
   try {
-    const payFlag = maxPay ? `--max-pay ${maxPay}` : '';
-    const payload = input ? `--json '${JSON.stringify(input).replace(/'/g, "\\'")}'` : '';
-    const command = `zero fetch ${url} ${payload} ${payFlag}`.trim();
-    const result = await runZeroCommand(command);
+    let enforcedMaxPay = ZERO_MAX_PAY_CEILING;
+    if (maxPay !== undefined && maxPay !== null) {
+      const parsedMaxPay = parseFloat(maxPay);
+      if (!isNaN(parsedMaxPay)) {
+        enforcedMaxPay = Math.min(parsedMaxPay, ZERO_MAX_PAY_CEILING);
+      }
+    }
+
+    const args = ['fetch', url, '--max-pay', String(enforcedMaxPay)];
+    if (input) {
+      args.push('--json', JSON.stringify(input));
+    }
+
+    const result = await runZeroCommand(args);
     res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.stderr || err.error.message });
@@ -91,9 +117,25 @@ app.post('/api/review', async (req, res) => {
     return res.status(400).json({ success: false, error: 'runId and rating are required' });
   }
 
+  if (typeof runId !== 'string' || !/^run_[A-Za-z0-9_-]+$/.test(runId)) {
+    return res.status(400).json({ success: false, error: 'runId must match /^run_[A-Za-z0-9_-]+$/' });
+  }
+
+  const ratingInt = Number(rating);
+  if (!Number.isInteger(ratingInt) || ratingInt < 1 || ratingInt > 5) {
+    return res.status(400).json({ success: false, error: 'Rating must be an integer between 1 and 5.' });
+  }
+
+  if (notes && (typeof notes !== 'string' || notes.length > 200)) {
+    return res.status(400).json({ success: false, error: 'Notes must be under 200 characters.' });
+  }
+
   try {
-    const command = `zero review ${runId} --rating ${rating} ${notes ? `--notes "${notes.replace(/"/g, '\\"')}"` : ''}`;
-    const result = await runZeroCommand(command);
+    const args = ['review', runId, '--rating', String(ratingInt)];
+    if (notes) {
+      args.push('--notes', notes);
+    }
+    const result = await runZeroCommand(args);
     res.json({ success: true, data: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.stderr || err.error.message });
